@@ -1,0 +1,14 @@
+#!/bin/sh
+# Stand-in for `wine adf2mp3.exe <in.adf> <out.mp3>` used by DOS.Zone's
+# revcdos-data-compile.py. An .adf radio station is an MP3 with every byte
+# XOR'd with 0x22 (adf2mp3.exe does exactly `xor byte [eax+edi], 0x22`),
+# so no Wine/i386 userland is needed.
+set -eu
+[ "$#" -eq 3 ] || { echo "wine shim: expected <exe> <in> <out>, got: $*" >&2; exit 2; }
+exec python3 -I -c '
+import sys
+table = bytes(i ^ 0x22 for i in range(256))
+with open(sys.argv[1], "rb") as src, open(sys.argv[2], "wb") as dst:
+    while chunk := src.read(1 << 20):
+        dst.write(chunk.translate(table))
+' "$2" "$3"

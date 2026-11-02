@@ -1,0 +1,30 @@
+// Headless smoke test of the launcher <-> revcDOS engine handshake.
+import { chromium } from "/tmp/pw/node_modules/playwright/index.mjs";
+const base = process.argv[2] || "http://localhost:8099/?fps=30";
+const browser = await chromium.launch({ args: ["--use-angle=swiftshader", "--enable-unsafe-swiftshader", "--autoplay-policy=no-user-gesture-required"] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const logs = [];
+page.on("console", (m) => logs.push(`[${m.type()}] ${m.text()}`.slice(0, 200)));
+page.on("pageerror", (e) => logs.push(`[pageerror] ${e.message}`.slice(0, 200)));
+const reqs = [];
+page.on("request", (r) => reqs.push(r.url().replace(/^https?:\/\/[^/]+/, "")));
+await page.addInitScript(() => {
+  if (window.top !== window) return;
+  window.__msgs = {};
+  window.addEventListener("message", (e) => { const k = e.data && e.data.event; if (k) window.__msgs[k] = (window.__msgs[k] || 0) + 1; }, true);
+});
+const t0 = Date.now();
+await page.goto(base);
+await page.waitForFunction(() => document.getElementById("status").textContent.includes("ready"), null, { timeout: 60000 });
+console.log("preload ready after", Date.now() - t0, "ms; status:", await page.textContent("#status"));
+const frame = page.frames().find((f) => f.url().includes("/engine/"));
+console.log("hooks:", await page.evaluate(() => { const w = document.getElementById("game").contentWindow; return { haveOriginalGame: w.haveOriginalGame, moduleAccessor: !!Object.getOwnPropertyDescriptor(w, "Module")?.set, rafPatched: !String(w.requestAnimationFrame).includes("native code") }; }));
+await frame.click("#click-to-play-button", { timeout: 10000 }).catch((e) => console.log("click failed:", e.message));
+await page.waitForTimeout(15000);
+console.log("messages seen by host:", JSON.stringify(await page.evaluate(() => window.__msgs)));
+console.log("Module.getAsyncUrl hooked:", await page.evaluate(() => { const w = document.getElementById("game").contentWindow; return { hasFS: !!(w.Module && w.Module.FS), fast: !!(w.Module && w.Module.__fastAsync), files: (() => { try { return w.Module.FS.readdir("/vc-assets/local/models").length; } catch (e) { return String(e); } })() }; }));
+console.log("frame:", await frame.evaluate(() => { const fps = []; return new Promise((res) => { let n = 0; const s = performance.now(); (function f() { if (++n < 31) requestAnimationFrame(f); else res(`~${Math.round(30000 / (performance.now() - s))} rAF/s with ?fps cap`); })(); }); }));
+console.log("requests:", reqs.filter((u) => !u.startsWith("data:")).slice(0, 40).join("\n  "));
+console.log("logs (last 25):\n  " + logs.slice(-25).join("\n  "));
+await page.screenshot({ path: "/tmp/vctest/smoke.png" });
+await browser.close();

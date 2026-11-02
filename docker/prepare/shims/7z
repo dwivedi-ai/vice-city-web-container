@@ -1,0 +1,4 @@
+#!/bin/sh
+# The upstream compiler zips its whole output at the end; we serve the
+# folder directly, so skip that (it would double disk use and time).
+echo "7z shim: skipping zip archive ($*)"

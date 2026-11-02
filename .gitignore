@@ -1,0 +1,11 @@
+gamefiles/*
+!gamefiles/README.txt
+vendor/
+.env
+.env.*
+!.env.example
+research/raw/
+.xo/
+*.zip
+*.bin
+__pycache__/

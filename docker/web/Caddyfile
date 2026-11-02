@@ -1,0 +1,28 @@
+{
+	admin off
+}
+
+# SITE_ADDRESS=":8080" serves plain HTTP. Set it to e.g. "localhost:8443"
+# to get HTTPS with Caddy's local CA (HTTP/2 + HTTP/3, Cache Storage, Gamepad API).
+{$SITE_ADDRESS::8080} {
+	root * /srv
+
+	header X-Content-Type-Options nosniff
+
+	# Content-addressed (hashed name or ?v=<data version>): cache forever.
+	@immutable path /data/bundle/preload-* /data/vc-assets/*
+	header @immutable Cache-Control "public, max-age=31536000, immutable"
+
+	# Everything else: always revalidate (cheap 304s via ETag).
+	@revalidate not path /data/bundle/preload-* /data/vc-assets/*
+	header @revalidate Cache-Control "no-cache"
+
+	# Never list directories or expose the prepare stamp.
+	@hidden path /data/.ready
+	respond @hidden 404
+
+	file_server {
+		precompressed zstd br gzip
+	}
+	encode zstd gzip
+}

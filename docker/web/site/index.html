@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vice City (revcDOS, self-hosted)</title>
+  <link rel="preload" href="data/bundle/manifest.json" as="fetch" crossorigin="anonymous">
+  <link rel="modulepreload" href="launcher.js">
+  <style>
+    html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+    #game { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
+    #bar { position: fixed; left: 0; top: 0; height: 3px; width: 0; background: #ff2d95;
+           box-shadow: 0 0 8px #ff2d95; transition: width .15s, opacity .6s; z-index: 2; pointer-events: none; }
+    #note { position: fixed; right: 8px; bottom: 6px; z-index: 2; font: 11px/1.3 system-ui, sans-serif;
+            color: #fff9; pointer-events: none; text-align: right; transition: opacity .6s; }
+    #note a { color: #fffc; pointer-events: auto; }
+    #error { position: fixed; inset: 0; display: none; place-items: center; z-index: 3;
+             background: #000d; color: #fff; font: 15px/1.5 system-ui, sans-serif; padding: 2em; text-align: center; }
+    .done { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="bar"></div>
+  <div id="note"><span id="status">Loading…</span><br>
+    HTML5 port by the <a href="https://dos.zone/revcdos" target="_blank" rel="noopener">DOS.Zone team (revcDOS)</a></div>
+  <div id="error"></div>
+  <iframe id="game" allow="autoplay; fullscreen; gamepad; keyboard-map; screen-wake-lock" allowfullscreen></iframe>
+  <script type="module" src="launcher.js"></script>
+</body>
+</html>

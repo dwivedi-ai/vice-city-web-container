@@ -1,0 +1,7 @@
+*
+!Dockerfile
+!shims
+!bundle.py
+!prepare.sh
+!Caddyfile
+!site
