@@ -22,7 +22,8 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Already-compressed formats: sidecars would only waste disk.
-INCOMPRESSIBLE = {".mp3", ".png", ".jpg", ".jpeg", ".zip", ".br", ".zst", ".gz", ".ogg", ".mp4"}
+# The compiler also stores MP3 audio under the original .adf/.wav names.
+INCOMPRESSIBLE = {".mp3", ".adf", ".wav", ".png", ".jpg", ".jpeg", ".zip", ".br", ".zst", ".gz", ".ogg", ".mp4"}
 MIN_SIZE = 1024
 MIN_SAVING = 0.05
 
@@ -70,6 +71,7 @@ def main():
     ap.add_argument("--brotli-level", type=int, default=11)
     ap.add_argument("--zstd-level", type=int, default=19)
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
+    ap.add_argument("--compression", choices=("all", "boot", "none"), default="all")
     args = ap.parse_args()
 
     data = Path(args.data)
@@ -89,6 +91,9 @@ def main():
     available = set(all_files)
 
     wanted = read_preload_list(args.preload_list)
+    # World loading opens map definitions and collision data synchronously.
+    wanted += [p for p in all_files if p not in wanted and
+               (p.startswith(("vc-assets/local/data/", "vc-assets/local/text/")) or p.endswith(".col"))]
     preload = [p for p in wanted if p in available]
     missing = [p for p in wanted if p not in available]
 
@@ -140,8 +145,12 @@ def main():
     if missing:
         print(f"bundle: {len(missing)} preload entries not in your data (ok for other game versions), e.g. {missing[:3]}")
 
-    targets = [p for p in list(bundle.glob("*.bin")) + [bundle / "manifest.json"]
-               + [data / f for f in all_files]
+    candidates = list(bundle.glob("*.bin")) + [bundle / "manifest.json"]
+    if args.compression == "all":
+        candidates += [data / f for f in all_files]
+    elif args.compression == "none":
+        candidates = []
+    targets = [p for p in candidates
                if p.suffix.lower() not in INCOMPRESSIBLE and p.stat().st_size >= MIN_SIZE]
     levels = {"br": args.brotli_level, "zstd": args.zstd_level}
     raw = packed = 0

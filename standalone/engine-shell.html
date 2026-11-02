@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Vice City</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0b0e; color: #f5f5f7; }
+    .start-container { position: fixed; inset: 0; z-index: 1000; display: grid; place-content: center; justify-items: center; gap: 24px; padding: 24px; background: #0b0b0e; }
+    .start-container[hidden] { display: none; }
+    h1 { margin: 0; font-size: 22px; font-weight: 500; letter-spacing: -.03em; }
+    button { min-width: 156px; min-height: 48px; padding: 12px 28px; border: 1px solid #e8e8ed; border-radius: 8px; background: #f5f5f7; color: #111115; font: 500 15px system-ui, sans-serif; cursor: pointer; transition: background .15s, opacity .15s; touch-action: manipulation; }
+    button:hover:not(:disabled) { background: #dedee5; }
+    button:focus-visible { outline: 2px solid #b5a0ff; outline-offset: 5px; }
+    button:disabled { opacity: .4; cursor: wait; }
+    #status { margin: 0; min-height: 20px; max-width: 340px; text-align: center; color: #96969f; font-size: 13px; line-height: 1.5; }
+    #canvas { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; visibility: hidden; }
+    .gameIsStarted #canvas { visibility: visible; }
+    {{TOUCH_CSS}}
+  </style>
+</head>
+{{BODY}}
+  <main class="start-container">
+    <h1>Vice City</h1>
+    <button id="click-to-play-button" type="button" disabled>Start game</button>
+    <p id="status" role="status" aria-live="polite">Loading game…</p>
+  </main>
+  <canvas id="canvas" tabindex="-1" aria-label="Vice City game" oncontextmenu="event.preventDefault()"></canvas>
+  {{TOUCH_CONTROLS}}
+  <script src="GamepadEmulator.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>

@@ -1,31 +1,13 @@
-# docker compose up -d --build   ->   http://localhost:${PORT:-8080}
 services:
-  # One-shot: converts your own Vice City install into web data (skipped when unchanged).
-  prepare:
-    build: docker/prepare
-    volumes:
-      - ${GAMEFILES:-./gamefiles}:/gamefiles:ro
-      - vcdata:/data
-      - vcsource:/source
-    environment:
-      FORCE: ${FORCE:-0}
-      # Optional: Google Drive share link (or any URL) of a .zip of your own install,
-      # used when ./gamefiles is empty.
-      GAME_URL: ${GAME_URL:-}
-
-  web:
-    build: docker/web
-    depends_on:
-      prepare:
-        condition: service_completed_successfully
+  game:
+    image: vice-city-standalone:local
+    build:
+      context: .
+      dockerfile: standalone/Dockerfile
+      args:
+        PREPARE_JOBS: ${PREPARE_JOBS:-2}
+        BROTLI_LEVEL: ${BROTLI_LEVEL:-6}
+        ZSTD_LEVEL: ${ZSTD_LEVEL:-10}
     ports:
       - "${PORT:-8080}:8080"
-    environment:
-      SITE_ADDRESS: ${SITE_ADDRESS:-:8080}
-    volumes:
-      - vcdata:/srv/data:ro
     restart: unless-stopped
-
-volumes:
-  vcdata:
-  vcsource:   # downloaded game archive, unpacked (never served by the web container)

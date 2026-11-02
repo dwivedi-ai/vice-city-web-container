@@ -9,3 +9,7 @@ research/raw/
 *.zip
 *.bin
 __pycache__/
+build.log
+.verification/
+standalone/out/
+standalone/.build-*/

@@ -1,78 +1,78 @@
-# Vice City in your browser, self-hosted (revcDOS + Docker)
+# Vice City in one Docker image
 
-This runs the DOS.Zone team's [revcDOS](https://dos.zone/revcdos) on your own machine. revcDOS is reVC (the reverse-engineered Vice City engine) compiled to WebAssembly. The game data comes from **your own copy of GTA: Vice City for PC**. Nothing copyrighted is downloaded or baked into the images.
+Build a self-contained browser version of Vice City from your classic PC game
+installation. The final image includes Caddy, the pinned revcDOS WebAssembly
+engine, the launcher and all converted game data. One image and one container
+are sufficient; no game files or volumes are mounted when running it.
 
+## Build and play locally
+
+Place your installation in `gamefiles/` (a nested folder such as
+`gamefiles/GTA_VC/` is detected), then run:
+
+```sh
+docker compose up -d --build
 ```
-./gamefiles  (your install, read-only)
-     │  prepare  (one-shot)
-     │    DOS.Zone's revcdos-data-compile.py: .img unpacked, audio → MP3
-     │    bundle.py: boot pack + zstd/br/gzip copies
-     ▼
- docker volume "vcdata"  ──►  web  (Caddy)  ──►  http://localhost:8080
-                                 engine/   official revcDOS v9 binaries (checksum-pinned)
-                                 index.html + launcher.js   (our host page)
+
+Open **http://localhost:8080**. The first build converts the audio and models;
+subsequent starts use the data baked into the image. See build progress with
+`docker compose build --progress plain`. Check readiness with `docker compose ps`
+and stop with `docker compose stop`. Set `PORT=9000` in `.env` to change the host
+port. Rebuild after replacing your game files.
+
+Use an unmodified classic PC installation, not the Definitive Edition. Preparation
+normalizes filename casing, supports separate Radio/Sound directories, and never
+writes to your source installation. Some expanded map packs exceed revcDOS limits;
+clean original files provide the most reliable compatibility.
+
+## Create a portable package
+
+```sh
+bash standalone/package.sh
 ```
 
-## Play
+This builds one image tag with Linux x86-64 and ARM64 variants and exports it,
+including every required layer, to `standalone/out/vice-city-standalone.tar.gz`.
+A checksum and run instructions accompany it. The multi-platform build requires
+a containerd-backed Docker image store (Docker Engine 29+ or current Docker Desktop).
 
-1. Copy your Vice City install folder into `./gamefiles/`. That is the folder with `gta-vc.exe`, `models/`, `audio/`, `data/` and so on. The Retail or Steam PC version works; the Definitive Edition does not. Alternatively, set `GAMEFILES=/path/to/Vice City`.
-2. Run:
-   ```sh
-   docker compose up -d --build
-   ```
-   The first run converts the data, which takes a few minutes (`docker compose logs -f prepare`). Later runs skip this unless your game files change. `FORCE=1` forces a rebuild.
-3. Open **http://localhost:8080**. Use `PORT=9000 docker compose up -d` to pick another port.
+On the destination machine:
 
-### Option: game files from your Google Drive
+```sh
+docker load -i vice-city-standalone.tar.gz
+docker run -d --name vice-city --restart unless-stopped -p 8080:8080 vice-city-standalone:local
+```
 
-Instead of filling `./gamefiles/`, you can keep a zip of **your own** install on Google Drive:
+No preparation service, game-folder mount or build tools are needed there.
+See [the portable-package instructions](standalone/README.md) for verification,
+architecture support, remote access and build options.
 
-1. Zip your Vice City install folder (on Windows: right-click the folder → *Send to* → *Compressed (zipped) folder*). `.tar.gz` works too.
-2. Upload the zip to Google Drive. Right-click it → *Share* → *General access: Anyone with the link* → *Copy link*.
-3. Start with the link (or put `GAME_URL=...` in `.env`):
-   ```sh
-   GAME_URL="https://drive.google.com/file/d/<id>/view?usp=sharing" docker compose up -d --build
-   ```
-   It is downloaded and unpacked once into the `vcsource` volume. The web server never serves that volume. Later starts reuse the download.
-4. Once it has been downloaded, turn the Drive sharing back to *Restricted*. Anyone who has the link can download the file while it is shared.
+The image works at localhost, server IPs and custom hostnames. Use HTTPS for remote
+browser features that require a secure context, including native gamepads and
+persistent asset caching. The launch screen has a single **Start game** button.
+Saves stay in this browser's IndexedDB storage; settings stay in localStorage.
+There is no account, cloud-save SDK, or remote save service. Clearing site data
+also removes local saves, and changing hostname/port uses a separate save store.
 
-`./gamefiles/` takes priority when it holds a game folder. `GAME_URL` also accepts any direct `https://` URL to an archive, for example one on your NAS.
+URL options: `?fps=30` caps rendering at 30 FPS; `?prefetch=1` warms remaining
+non-audio assets in the background. Game language can be changed in its options.
 
-URL options:
+## Development
 
-| Option | Effect |
-|---|---|
-| `?fps=30` | Frame cap without busy-waiting. The original physics are tuned for 30; uncapped can break some missions. |
-| `?prefetch=1` | Once the game is running, download the remaining models and animations into the browser cache in the background, so they never cause a hitch. |
-| `?lang=ru` | Russian UI text (DOS.Zone option). |
+`standalone/Dockerfile` is the complete multi-stage build. `docker/prepare/`
+contains the conversion and bundling scripts, and `docker/web/` contains the
+launcher and Caddy configuration. The older Dockerfiles under those directories
+are not used by the single-image Compose or packaging workflow.
 
-Saves are kept in your browser's IndexedDB. DOS.Zone's optional cloud saves need a js-dos key, entered on their start screen.
+Run regression checks with `python3 -m unittest discover -s tests -v`.
 
-### Playing from another device
+The HTML5 port is by the [DOS.Zone team](https://dos.zone/revcdos): okhmanyuk-ev,
+caiiiycuk and SerGen. This custom build replaces the launch page, restores the
+original game logo, removes the cloud integration, and blanks the compiled menu
+footer. `standalone/customize.py` verifies the pinned v9 WASM checksum before
+editing only its footer text bytes; it preserves binary sizes and addresses.
+Review these patches when changing engine releases. The modified logo is bundled
+under a new content hash so browsers do not reuse the previous boot assets.
 
-The revcDOS page only allows itself to run when the top page is on `localhost`, `192.168.0.*` or `dos.zone`; any other host redirects to dos.zone. That is their rule, and this setup leaves it alone. To play from another computer, forward the port with `ssh -L 8080:localhost:8080 your-server` and open `http://localhost:8080` there. The Gamepad API and Cache Storage also need a secure context, which `localhost` is.
-
-## What makes it faster than the public mirrors
-
-| | Typical mirror (e.g. quenq) | This setup |
-|---|---|---|
-| Engine (`index.wasm`, 7.6 MB) | brotli on the fly, 2.4 MB | stored brotli-11, **1.8 MB**, or zstd-19 |
-| Boot data | 135 MB **uncompressed**, preloads all of `gta3.img` | only the boot file list (DOS.Zone says about 50 MB), stored zstd/br/gzip, a few parallel parts |
-| Start of download | after you click play | **at page open**, while the start screen is showing |
-| Repeat visit | Cache Storage | Cache Storage keyed by content hash. No network except a 304 on the manifest. |
-| On-demand assets | `blob:` URLs that game.js never frees (memory grows all session) | direct URLs, `immutable` cache, nothing left in memory |
-| Radio | 1 station, the rest silent stubs | all stations from your install |
-| Frame cap | patched Emscripten loop | `?fps=N` |
-| Compile tool chain | Wine + i386 (about 1 GB) | no Wine: `.adf` is an MP3 XOR'd with 0x22, so a 10-line shim replaces `adf2mp3.exe` |
-
-## Layout
-
-- `docker/prepare/`: converter image (Debian, ffmpeg, brotli, zstd). It pulls DOS.Zone's compiler at a pinned commit and checks it against checksums, and adds `bundle.py`, `prepare.sh`, `fetch_game.py` (Google Drive/URL download) and the `wine`/`7z` shims.
-- `docker/web/`: Caddy image. It contains the revcDOS v9 release (pinned SHA-256) precompressed at build time, the `Caddyfile` and `site/` (the launcher).
-- `research/REPORT.md`: how the public web ports work.
-
-## Credits and terms
-
-The HTML5 port is by the **DOS.Zone team** ([dos.zone/revcdos](https://dos.zone/revcdos)): okhmanyuk-ev, caiiiycuk and SerGen. They allow self-hosting if you credit them, keep cloud saves, and keep their logo in the menu. Their engine files are served unmodified, and the launcher shows the credit.
-
-reVC is a community reverse-engineering project. This is not affiliated with Rockstar Games or Take-Two. Use your own legally owned game files, and keep it for personal use.
+This is not affiliated with Rockstar Games or Take-Two. Use your own legally owned
+game data and keep the resulting image private; it contains those game assets.

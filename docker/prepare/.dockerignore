@@ -4,5 +4,8 @@
 !bundle.py
 !prepare.sh
 !fetch_game.py
+!stage_game.py
+!audio_cache.py
+!audio_streams.list
 !Caddyfile
 !site

@@ -20,26 +20,22 @@ const prefetch = params.get("prefetch") === "1";
 
 const iframe = document.getElementById("game");
 const bar = document.getElementById("bar");
-const statusEl = document.getElementById("status");
-const noteEl = document.getElementById("note");
 const errorEl = document.getElementById("error");
+let dataReady = false;
+let progressText = "Loading game…";
 
 const PRELOAD_CACHE = "vc-preload";
+const SOUND_CACHE = "vc-assets/local/audio/sound.cache";
 
 function setProgress(fraction, text) {
   bar.style.width = `${Math.round(fraction * 100)}%`;
-  if (text) statusEl.textContent = text;
-}
-
-function fail(message) {
-  errorEl.textContent = message;
-  errorEl.style.display = "grid";
-  throw new Error(message);
+  if (text !== undefined) progressText = text;
+  iframe.contentWindow?.postMessage({ event: "launcher.progress", ready: dataReady, text: progressText }, location.origin);
 }
 
 async function loadManifest() {
   const res = await fetch("data/bundle/manifest.json", { cache: "no-cache" });
-  if (!res.ok) fail("Game data not found. Run the prepare step first (see README).");
+  if (!res.ok) throw new Error("Game data is unavailable. Reload to try again.");
   return res.json();
 }
 
@@ -90,7 +86,7 @@ async function loadPreload(manifest) {
     all.set(b, at);
     at += b.length;
   }
-  setProgress(1, "Game data ready - click to play");
+  setProgress(1, "Preparing game…");
   return all;
 }
 
@@ -103,6 +99,15 @@ function normalize(file) {
 }
 
 function installFrameHooks(win, manifest, available) {
+  if (win.__launcherHooksInstalled) return;
+  win.__launcherHooksInstalled = true;
+  // Keyboard Lock is restricted to the top-level browsing context. Failure is
+  // optional (for example before fullscreen), so never reject engine startup.
+  if (win.navigator.keyboard?.lock) {
+    win.navigator.keyboard.lock = async (keys) => {
+      try { await navigator.keyboard?.lock(keys); } catch {}
+    };
+  }
   // game.js does `window.Module = Module` when the player clicks play, and
   // the engine reaches assets through that object. Hand it real URLs for
   // on-demand assets. Install as early as possible, and adopt a Module that
@@ -158,11 +163,29 @@ let preloadedSet = new Set();
 async function main() {
   const manifest = await loadManifest();
   const available = new Set(manifest.files);
-  const files = manifest.preload.files;
+  const files = manifest.preload.files.filter(([path]) => path !== SOUND_CACHE);
   preloadedSet = new Set(files.map((f) => f[0]));
+  preloadedSet.add(SOUND_CACHE);
 
-  const preloadPromise = loadPreload(manifest).catch((e) => fail(`Failed to download game data: ${e.message}`));
+  // Read separately so older boot packs can use a newly generated audio index.
+  // Without durations, the engine divides by zero while initializing streams
+  // that have intentionally not been downloaded yet.
+  const soundCachePromise = fetch(assetUrl(manifest, SOUND_CACHE)).then(async (res) => {
+    if (!res.ok) throw new Error("Game audio is unavailable. Reload to try again.");
+    return new Uint8Array(await res.arrayBuffer());
+  });
 
+  const preloadPromise = Promise.all([loadPreload(manifest), soundCachePromise]);
+  preloadPromise.then(() => {
+    dataReady = true;
+    setProgress(1, "");
+    bar.classList.add("done");
+  }).catch((e) => { errorEl.textContent = `Failed to load the game: ${e.message}`; errorEl.style.display = "grid"; });
+
+  iframe.addEventListener("load", () => {
+    installFrameHooks(iframe.contentWindow, manifest, available);
+    iframe.contentWindow.postMessage({ event: "launcher.progress", ready: dataReady, text: progressText }, location.origin);
+  });
   iframe.src = `engine/index.html${location.search}`;
   // Install the hooks the moment the engine page's document exists (before its
   // scripts can run user-triggered code), not at the late iframe "load" event.
@@ -176,31 +199,34 @@ async function main() {
   })();
 
   let preload = null;
+  let soundCache = null;
   let next = 0;
   window.addEventListener("message", async (event) => {
-    if (event.source !== iframe.contentWindow) return;
+    if (event.source !== iframe.contentWindow || event.origin !== location.origin) return;
     const data = event.data || {};
-    const reply = (msg, transfer) => event.source.postMessage(msg, "*", transfer);
+    const reply = (msg, transfer) => event.source.postMessage(msg, location.origin, transfer);
 
     switch (data.event) {
       case "module.initfs":
-        statusEl.textContent = "Starting engine…";
-        preload = await preloadPromise;
+        [preload, soundCache] = await preloadPromise;
         next = 0;
-        reply({ event: ">module.initfs", files: files.length });
+        reply({ event: ">module.initfs", files: files.length + 1 });
         break;
       case "module.initfile": {
+        if (next === files.length) {
+          next++;
+          reply({ event: ">module.initfile", path: SOUND_CACHE, data: soundCache }, [soundCache.buffer]);
+          preload = null;
+          soundCache = null;
+          bar.classList.add("done");
+          if (prefetch) startPrefetch(manifest, available);
+          break;
+        }
         const entry = files[next++];
         if (!entry) return console.error("engine asked for more boot files than exist");
         const [path, offset, size] = entry;
         const bytes = preload.slice(offset, offset + size);
         reply({ event: ">module.initfile", path, data: bytes }, [bytes.buffer]);
-        if (next === files.length) {
-          preload = null; // let the big buffer go
-          noteEl.classList.add("done");
-          bar.classList.add("done");
-          if (prefetch) startPrefetch(manifest, available);
-        }
         break;
       }
       case "module.getasyncurl": {
@@ -218,4 +244,7 @@ async function main() {
   });
 }
 
-main();
+main().catch((error) => {
+  errorEl.textContent = error.message || "Unable to load the game. Reload to try again.";
+  errorEl.style.display = "grid";
+});

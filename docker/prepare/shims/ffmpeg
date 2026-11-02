@@ -1,0 +1,4 @@
+#!/bin/sh
+# The compiler already runs many audio jobs in parallel. Keep each filter graph
+# single-threaded instead of creating a CPU-sized thread pool for every sample.
+exec /usr/bin/ffmpeg -threads 1 -filter_threads 1 -filter_complex_threads 1 "$@"

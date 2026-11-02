@@ -23,9 +23,13 @@ RUN set -eu; \
       | sha256sum -c -; \
     touch adf2mp3.exe
 
+# The RAW conversion rewrites sample rates in sfx.sdt. Do not let the parallel
+# plain-file copy overwrite that generated index with the original one.
+RUN python3 -c 'from pathlib import Path; p = Path("/opt/revcdos/src/revcdos-data-compile.py"); s = p.read_text(); old = "        else:\n            copy2(src_path, dst_path)"; assert s.count(old) == 1; p.write_text(s.replace(old, "        elif basename(src_path).lower() == \"sfx.sdt\":\n            return\n" + old))'
+
 COPY shims/ /usr/local/bin/
-COPY bundle.py prepare.sh fetch_game.py /opt/prepare/
-RUN chmod +x /usr/local/bin/wine /usr/local/bin/7z /opt/prepare/prepare.sh
+COPY bundle.py prepare.sh fetch_game.py stage_game.py audio_cache.py audio_streams.list /opt/prepare/
+RUN chmod +x /usr/local/bin/wine /usr/local/bin/7z /usr/local/bin/ffmpeg /opt/prepare/prepare.sh
 
 VOLUME ["/data"]
 ENTRYPOINT ["/opt/prepare/prepare.sh"]
