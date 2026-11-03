@@ -3,7 +3,7 @@ services:
     image: vice-city-standalone:local
     build:
       context: .
-      dockerfile: standalone/Dockerfile
+      dockerfile: Dockerfile
       args:
         PREPARE_JOBS: ${PREPARE_JOBS:-2}
         BROTLI_LEVEL: ${BROTLI_LEVEL:-6}

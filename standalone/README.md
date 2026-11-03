@@ -110,12 +110,23 @@ headers. Other URLs revalidate. Keep `Content-Encoding`, `Vary: Accept-Encoding`
 and query strings intact in any hosting proxy/CDN. The image cannot override a
 hosting bandwidth limit; measure delivery through the public URL after release.
 
-Run regression checks with `python3 -m unittest discover -s tests -v` and
-`node --test tests/test_*.mjs` (Node 22+). Texture tests require Pillow 11.3.0
-(the build installs it only in a build stage). Browser validation should include
-cold/warm startup, New Game, entering vehicles/radio, driving, and local saves.
+The root `Dockerfile` is the only build definition. For source-checkout tests,
+follow `README.md`: create `.venv`, install `requirements-dev.txt`, then run both
+the Python and Node suites. Texture dependencies are required, not optional.
+Browser validation should include cold/warm startup, New Game, entering
+vehicles/radio, driving, and local saves.
 
 HTML5 port by the [DOS.Zone team](https://dos.zone/revcdos). This custom build uses
 a minimal launch page, the original game's menu logo, local saves, and a guarded
 patch to remove the compiled menu footer. Engine upgrades require reviewing the
 patch against the new binary; an unexpected checksum stops the build.
+
+## License scope and permission status
+
+The source repository licenses only original project contributions under MIT.
+The engine, upstream-derived generated launcher, and game assets retain separate
+terms. Upstream requires its menu logo and cloud integration; this image removes
+both, and no exception is recorded. Permission for this modified configuration
+remains unresolved, even for a private repository. See `THIRD_PARTY.md` in the
+source checkout before hosting or distributing it. Source cleanup does not change
+the terms applying to an already exported image.

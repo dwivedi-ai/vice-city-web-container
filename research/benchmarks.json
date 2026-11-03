@@ -1,0 +1,85 @@
+{
+  "measured_date": "2026-11-03",
+  "scope": "Local browser measurements; not deployed Launchpad results or statistical averages.",
+  "baseline_source": "50ded74a4990104100a08974c80a83caf15be150",
+  "optimized_source": "6f97af1dc57b6b603ed5708739d778a195ea73b2",
+  "optimized_image_index": "sha256:1c8074a91c86c39ef7995b8d5f5443c6f2a765b9c6cbe282c9477571e8e1c2be",
+  "notes": [
+    "Headless Chrome, software WebGL, fps=30, screenshots polled every two seconds.",
+    "Cold runs disabled HTTP cache and cleared Cache Storage.",
+    "Warm run reused game/audio caches and explicitly primed shell/engine HTTP cache.",
+    "Optimized server: one CPU and 4 GiB; baseline had no explicit CPU quota.",
+    "World timings include engine initialization and intro; random traffic affects requests.",
+    "Raw traces are local ignored artifacts; source hashes record provenance, not independent reproducibility."
+  ],
+  "runs": [
+    {
+      "id": "baseline-fast",
+      "source_sha256": "316a94d6e73024a4354540ff26062cba02a4be199fb713e9b74d5f32d8a24da0",
+      "warm": false,
+      "downloadBytesPerSecond": 750000,
+      "latencyMs": 80,
+      "viewport": "800x600",
+      "screenshotPollingSeconds": 2,
+      "startButtonSeconds": 105.02363991737366,
+      "quality": null,
+      "menuSeconds": 111.36089324951172,
+      "worldSeconds": 163.61485958099365
+    },
+    {
+      "id": "idle-full-fast",
+      "source_sha256": "1acdf4653507e302985294cc5c08aa688ffc209472b1e4c6b047d9eb671fbcba",
+      "warm": false,
+      "downloadBytesPerSecond": 750000,
+      "latencyMs": 80,
+      "viewport": "800x600",
+      "screenshotPollingSeconds": 2,
+      "startButtonSeconds": 11.459192752838135,
+      "quality": "full",
+      "menuSeconds": 22.076085805892944,
+      "worldSeconds": 71.67915320396423,
+      "httpReceivedBodyBytes": 35038523,
+      "network_source_sha256": "009b20d57b2a87206c574e225ad053b8a782367a3e61dd9616443a88d6e88de0"
+    },
+    {
+      "id": "final-slow",
+      "source_sha256": "2b518a7dc4dd021f6d669709b6e2883b025c7774e7403926e33b35ca2f37c430",
+      "warm": false,
+      "downloadBytesPerSecond": 150000,
+      "latencyMs": 270,
+      "viewport": "800x600",
+      "screenshotPollingSeconds": 2,
+      "startButtonSeconds": 48.957006216049194,
+      "quality": "low",
+      "menuSeconds": 86.0813934803009,
+      "worldSeconds": 183.17366290092468,
+      "httpReceivedBodyBytes": 25225152,
+      "network_source_sha256": "328935c7e003377a04b2902a032d7914825954048b25e933828fc931d975dd4a"
+    },
+    {
+      "id": "final-warm",
+      "source_sha256": "51fc45490be300b3bde663fcf021590efed7a137d6f6ac38f7eead100b2b89ea",
+      "warm": true,
+      "downloadBytesPerSecond": 150000,
+      "latencyMs": 270,
+      "viewport": "800x600",
+      "screenshotPollingSeconds": 2,
+      "startButtonSeconds": 1.8134584426879883,
+      "quality": "low",
+      "menuSeconds": 4.114012718200684,
+      "worldSeconds": 47.54330348968506,
+      "httpReceivedBodyBytes": 0,
+      "network_source_sha256": "8242ba2e9e59b61bc6c4990ac375f61b190349b9617006550957d91ad5168c21"
+    }
+  ],
+  "compressed_pack_budgets": {
+    "full": {
+      "core_brotli_bytes": 7530872,
+      "first_scene_brotli_bytes": 12308214
+    },
+    "low": {
+      "core_brotli_bytes": 6709243,
+      "first_scene_brotli_bytes": 6809654
+    }
+  }
+}

@@ -13,3 +13,4 @@ build.log
 .verification/
 standalone/out/
 standalone/.build-*/
+.venv/

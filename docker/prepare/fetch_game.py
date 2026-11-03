@@ -12,6 +12,7 @@ Skips the download when <dest-dir> already holds this exact source.
 
 import html
 import re
+import stat
 import urllib.error
 import shutil
 import sys
@@ -72,24 +73,37 @@ def download(src, path):
              "'Anyone with the link' and the link points at a single .zip file.")
 
 
+def safe_target(dest, name):
+    """Compare path components, not string prefixes (out vs out-sibling)."""
+    root = dest.resolve()
+    target = (root / name).resolve()
+    if Path(name).is_absolute() or not target.is_relative_to(root):
+        sys.exit(f"fetch: refusing unsafe path in archive: {name}")
+    return target
+
+
 def extract(archive, dest):
     if zipfile.is_zipfile(archive):
         with zipfile.ZipFile(archive) as z:
             for info in z.infolist():
-                target = (dest / info.filename).resolve()
-                if not str(target).startswith(str(dest.resolve())):
-                    sys.exit(f"fetch: refusing unsafe path in archive: {info.filename}")
+                safe_target(dest, info.filename)
+                kind = stat.S_IFMT(info.external_attr >> 16)
+                if kind not in (0, stat.S_IFREG, stat.S_IFDIR):
+                    sys.exit(f"fetch: refusing special entry in archive: {info.filename}")
             z.extractall(dest)
     elif tarfile.is_tarfile(archive):
         with tarfile.open(archive) as t:
-            if hasattr(tarfile, "data_filter"):
-                t.extractall(dest, filter="data")
+            # Validate the entire member list before writing any entries. Game
+            # backups need only files/directories, not links or device nodes.
+            members = t.getmembers()
+            for m in members:
+                safe_target(dest, m.name)
+                if not (m.isfile() or m.isdir()):
+                    sys.exit(f"fetch: refusing unsafe entry in archive: {m.name}")
+            if callable(getattr(tarfile, "data_filter", None)):
+                t.extractall(dest, members=members, filter="data")
             else:
-                for m in t.getmembers():
-                    target = (dest / m.name).resolve()
-                    if not str(target).startswith(str(dest.resolve())) or m.issym() or m.islnk():
-                        sys.exit(f"fetch: refusing unsafe entry in archive: {m.name}")
-                t.extractall(dest)
+                t.extractall(dest, members=members)
     else:
         sys.exit("fetch: the download is not a .zip or .tar archive.")
 

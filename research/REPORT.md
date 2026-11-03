@@ -1,115 +1,223 @@
-# How quenq.com runs GTA: Vice City in the browser
+# Engineering report: delivering Vice City over slow connections
 
-Investigated 2026-11-02. Sources: the live site (HTML, JS, response headers), the WASM binary's strings and section headers (inspected in /tmp, then deleted), and public repos and articles listed at the end. No game asset data was downloaded. The only checks against asset URLs were HEAD requests.
+Measured 2026-11-03. This report describes the asset-delivery implementation in
+source revision `6f97af1`, its controlled browser tests, and its remaining limits.
+The [compact benchmark data](benchmarks.json) retains exact timing values and
+source-record hashes. Later repository cleanup changes documentation, test setup,
+and archive extraction; it is not a new gameplay benchmark.
 
-## TL;DR
+## Result
 
-This is not emulation. **reVC** is the community reverse-engineered C++ source of Vice City. **DOS.Zone** (caiiiycuk/js-dos, okhmanyuk-ev, SerGen) compiled it to **WebAssembly with Emscripten**, under the internal name **"vc-sky"** / "revcDOS". It renders through **WebGL2**, plays sound through **Web Audio** (an OpenAL shim), and stores saves in **IndexedDB**.
+The principal improvement was changing **when and how assets reach the engine**.
+A smaller boot set alone moved waiting into New Game; it did not solve the problem.
+Combining a small synchronous core with first-scene packs, demand-first downloads,
+and filesystem prefill improved both startup and entry into the world.
 
-quenq.com hosts its own copy of the DOS.Zone build. The WASM still has `https://cdn.dos.zone/vcsky/` hard-coded, and a one-line JS shim rewrites it to quenq's own `/vcsky/`. Around that build, quenq added a Vue UI, a save manager, a mod manager and an FPS limiter.
+At 750,000 download bytes/s (6 Mbps) and 80 ms simulated latency, with cold caches
+and original-quality textures:
 
-## 1. Page structure
+| Milestone | Baseline | Adaptive streaming | Reduction |
+|---|---:|---:|---:|
+| Start ready | 105.024 s | 11.459 s | 89.1% |
+| Native menu | 111.361 s | 22.076 s | 80.2% |
+| Playable street | 163.615 s | 71.679 s | 56.2% |
 
-```
-quenq.com/apps/vice-city/          ads, SEO text, Disqus
-  └─ <iframe src="https://vc.quenq.com">   CSP frame-ancestors limits embedding to quenq/kwenk
-        index.html  (Vue 3 + Pinia SPA built with Vite: /assets/index-*.js)
-        ├─ /assets/js/GamepadEmulator.js   virtual gamepad for touch
-        ├─ /assets/js/idbfs.js             IndexedDB FS helpers
-        ├─ /assets/js/game.js              loader: downloads data, builds `Module`
-        └─ /assets/js/index.js             loads the Emscripten glue, split into modules:
-              runtime.js packages.js loader.js fs.js audio.js graphics.js
-              events.js fetch.js asm_consts.js main.js
-        └─ /vcsky/vc-sky-en-v6.wasm        the engine (7.6 MB raw, 2.4 MB brotli)
-        └─ /vcsky/vc-sky-en-v6.data.00..06 preloaded game data (135,355,111 bytes)
-        └─ /vcsky/fetched/...              assets streamed on demand
-```
+The playable-street comparison is **2.28× as fast**. This is a measured delivery
+improvement while preserving original profile asset bytes, not an FPS improvement,
+engine rewrite, production SLA, or average across repeated trials.
 
-- Opened outside an iframe, vc.quenq.com redirects to quenq.com.
-- game.js contains a function disguised as an audio routine, `chunkRe3Audio`. Its strings are XOR-17 encoded. Decoded, it is a **domain lock**: if `location.hostname` is not `localhost` or `*.quenq.com`, it calls `location.replace("https://quenq.com")`.
-- The Emscripten glue is not minified, and quenq has edited it by hand. Examples are the `// ---- NEW: SMART CPU-FRIENDLY FPS THROTTLE ----` block in `runtime.js` and the `replaceFetch` hook in `fetch.js`.
+## Why the original delivery stalled
 
-## 2. The engine (WASM)
+The baseline preloaded 126,914,308 decoded bytes across 1,917 files. Its browser
+startup transfer was approximately 74.16 MB. That included a 28.7 MB Flash FM
+recording and many models that were not all needed before Start could be enabled.
+Large downloads made interruptions expensive; late individual asset requests then
+introduced more waiting during play.
 
-| Fact | Evidence |
-|---|---|
-| reVC compiled by Emscripten with clang/LLVM 22 | `22.0.0git (llvm-project 60513b8…)` string; `/emsdk/emscripten/...` paths |
-| Built by DOS.Zone | Build paths `/home/caiiiycuk/vc/vc-sky/...`; `PACKAGE_NAME = "/home/caiiiycuk/vc/vc-sky/index.data"` |
-| RenderWare replaced by **librw** (aap's open RW reimplementation), GL3 backend | `vc-sky/libs/librw/src/gl/gl3raster.cpp`, `rw::Stream...` symbols |
-| Wrapped in Okhmanyuk's **"Sky Engine"** framework | `sky::ImguiConsole`, `sky::CVar`, `skygfx::RenderTarget/VertexBuffer/ShaderReflection`, "Sky Engine" string |
-| Shaders written as Vulkan-style GLSL 450 and cross-compiled at runtime to WebGL GLSL ES with **glslang + SPIRV-Cross** | `#version 450 core`, `layout(binding = …)`, many SPIRV-Cross/glslang error strings |
-| Dear ImGui for the debug console and cvars (plus a cheat menu in the DOS.Zone build) | ImGui strings |
-| MP3 decoding inside WASM with the **mpg123** Emscripten port | `/emsdk/emscripten/cache/ports/mpg123/mpg123-1.26.2/...` |
-| **Single-threaded**: memory is not shared, there are no pthreads, no SharedArrayBuffer | Memory section flags = 1 (not shared). So COOP/COEP headers aren't needed, and it works inside a cross-origin iframe |
-| Memory: 128 MB at start, can grow to 2 GB | Memory section: min 2048 pages, max 32768 |
-| C++ exceptions through Emscripten's JS-based EH | `__cxa_find_matching_catch_*` imports |
-| 615 JS imports and 16 minified exports (`_main`, `malloc`, …) | Import/export sections |
+Public-path measurements ranged from approximately 150–250 KB/s with roughly
+one-second time to first byte. One cold browser attempt ultimately failed after
+several minutes. Four simultaneous 256 KiB byte-range requests shared about
+148 KB/s aggregate throughput in a later probe, rather than multiplying capacity.
+These observations establish a slow measured route, **not a proven Launchpad
+bandwidth cap**. Client network, transit, proxy, and origin delivery were not
+independently isolated.
 
-DOS.Zone also changed the engine to be **asynchronous**. In their words: "revcDOS is a completely asynchronous game. From time to time, it will request additional files as they are needed." A browser can't block on file I/O, so missing files are requested with `emscripten_fetch` while the game keeps running. The engine flips `document.body.dataset.stateDownload` so the UI can show a "downloading" indicator.
+## Implementation
 
-## 3. How the game data gets there
+### Prepare once, serve static files
 
-**a) Preload: 135 MB, 1,943 files** (manifest in `modules/packages.js`)
-- Packed with Emscripten's `file_packager`, then split into **7 chunks of 20 MB** (`.data.00`–`.06`).
-- game.js downloads all 7 **in parallel** with `fetch()` streaming readers, shows a progress bar, and stores each chunk in the **Cache Storage API** (`caches.open(hostname + '-chunks-v2')`). Later visits skip the network.
-- The chunks are joined into one `Uint8Array` and passed in through `Module.getPreloadedPackage`. `loader.js` then creates each file in **MEMFS** as a zero-copy `subarray` of that buffer, under `/vc-assets/local/...`.
-- Breakdown: `models/gta3.img/*` 68.5 MB in 1,722 files, `audio/flash.adf` 25.5 MB (the only radio station), `data/maps` 9 MB, cutscene anims 5.4 MB, plus TXDs, text, `main.scm` and the rest.
-- **gta3.img is unpacked into separate files** (`/models/gta3.img/<name>.dff`) instead of one 2 GB-style archive. The modified streamer reads a directory. That is also why the mod manager can replace a single file and patch its sector size in `gta3.dir`.
+The multi-stage Docker build converts audio/models, validates inputs and bundles,
+and prepares compressed sidecars. The final image contains Caddy, the pinned
+upstream WASM engine, both texture profiles, and original assets for fallback.
+It runs as UID 1000 without game-data mounts or a second service. The game executes
+in the browser, so adding server CPU does not directly accelerate its simulation.
 
-**b) On-demand streaming** (`/vcsky/fetched/...`)
-- Mission and cutscene audio and cutscene animations are fetched only when needed. HEAD checks:
-  - `fetched/audio/city.mp3`: 200, 3.9 MB, audio/mpeg
-  - `fetched/audio/ass_1.mp3`: 200, 133 KB
-  - `fetched/anim/cuts.img/ass_1.ifp`: 200, 266 KB
-- The WASM contains about 2,450 `AUDIO\*.WAV` / `*.MP3` names. All audio was transcoded to MP3 offline.
-- DOS.Zone's data-compile Docker image does this conversion: ADF → MP3 (Wine + `adf2mp3.exe` + ffmpeg), WAV/RAW → MP3, `.img` extracted using its `.dir`.
+The core contains 179 files and 24,376,543 decoded bytes. Map configuration retains
+its required references; model/cutscene dependencies move into streaming packs.
+Core chunks and ordinary packs target 512 KiB decoded, with an oversized individual
+file kept intact. All 17,565 original assets remain addressable. Filesystem traces
+provided the initial scene list; later groups use IDE model/texture relationships.
 
-**c) Things quenq dropped or stubbed**
-- Only Flash FM is shipped. Before `main`, game.js writes a **5-second silent MP3** for Emotion, Espantoso, Fever, K-Chat, VCPR, V-Rock, Wave and Wildstyle so the engine doesn't fail on the missing files.
-- `NoMovies=0` is set, but no movie files are included.
+SHA-256 filenames allow unchanged chunks to survive releases in browser caches.
+Only hashed paths and versioned asset URLs receive immutable cache headers.
+Caddy serves Brotli/Zstandard/gzip sidecars where present. HTML and manifests
+revalidate; hashes of streamed assets participate in version invalidation.
 
-**d) Caching and compression**
-- Cloudflare serves everything with `max-age=31536000` (1 year).
-- The WASM is brotli-compressed on the wire (7.6 → 2.4 MB).
-- The data chunks are **sent uncompressed** (20,971,520 bytes even with `Accept-Encoding: br`). Compressing them is an easy win quenq hasn't taken (see §7).
+### Schedule around gameplay demand
 
-## 4. Rendering
+First-scene preparation starts after core readiness and overlaps Start/menu/engine
+initialization. Two pack downloads run concurrently; a demanded asset can preempt
+speculative traffic. Requests for a common pack share a transfer. The downloader
+validates decoded length and, in secure contexts, SHA-256 before accepting bytes.
+It bounds retries, cancels siblings after a terminal boot failure, and tolerates
+unavailable browser storage. Completed chunks can be reused after Retry.
 
-- One `<canvas id="canvas">`. Emscripten's GL layer creates a **WebGL2** context (WebGL1 fallback) with `antialias:false, alpha:false`. Many extensions are enabled when present: S3TC/DXT (the original textures are DXT1–5), anisotropic filtering, `KHR_parallel_shader_compile`, multi_draw, and others.
-- librw's GL3 backend plus skygfx render the RW scene, with an option for a newer pipeline (`[Rendering] NewRenderer=1`, `BackfaceCulling=1`).
-- Settings come from a `revc.ini` generated in game.js and stored in localStorage (`vcsky.revc.ini`). Defaults: 800×600, `DrawDistance=1.8`, Ped/Car density 1.2, VSync on, MSAA 0, PS2 alpha test, PS2 colour filter (`ColourFilter=2`), motion blur off, and the reVC "Neo" pipelines (rim light, lightmaps, road gloss) off. Widescreen fixes `ProperScaling/FixRadar/FixSprites` are on.
-- If the WebGL context is lost, the page shows an alert asking you to reload. There is no recovery.
+Related files are inserted into the native filesystem once its initial directory
+setup is complete. Inserting them earlier collided with the engine's exclusive
+`mkdir` calls; browser testing exposed and corrected that integration issue.
+Random non-warmup traffic models no longer cancel the finite first-scene queue.
+Failed packs fall back to individual versioned assets, which may be full quality.
 
-## 5. Main loop, audio, input, saves
+Decoded model packs have a 64 MiB LRU; speculative filesystem insertion has a
+separate 48 MiB budget. These are separate limits, not a cap on total browser or
+WASM memory. Temporary owned blob URLs are released after delivery.
 
-- **Main loop:** `emscripten_set_main_loop`, driven by `requestAnimationFrame`. quenq's patch to `MainLoop.runner` adds an FPS cap that skips rAF ticks until `1000/fps` ms have passed (`Module._setFPSLimit`, `?max_fps=`). The default is 0 (uncapped). The site's own FAQ says uncapped frame rates break the original physics and some missions, and recommends capping at 30.
-- **Audio:** reVC's OpenAL backend runs on Emscripten's **OpenAL-over-Web-Audio** shim (`audio.js`: `alGenSources`, panners and the rest), plus SDL2 audio. MP3 is decoded by mpg123 in WASM. The AudioContext is resumed on user input to satisfy autoplay rules.
-- **Input:** Emscripten HTML5 callbacks handle keyboard, mouse, wheel, pointer lock, touch, gamepad, focus and visibility. Key bindings live in `revc.ini [Bindings]`. The real **Gamepad API** handles Xbox/PS pads.
-  - On touch devices, `GamepadEmulator.js` creates a **fake gamepad**: two virtual joysticks plus about 15 HTML buttons mapped to pad button indices.
-  - The engine pushes game state (in car, on foot with gun, menu, cutscene, phone ringing, sniper scope, and so on) to `<body data-state-*>` through `EM_ASM` calls (`asm_consts.js`). CSS uses these attributes to show only the touch buttons that make sense at that moment.
-  - A hidden `<input>` turns mobile keyboard text into synthetic key events for cheat entry.
-- **Saves:** `/vc-assets/local/userfiles` is mounted as **IDBFS**. The engine calls `FS.syncfs` through EM_ASM after saving, so `GTAVCsf1..8.b` persist in IndexedDB. The Vue save manager reads and writes that same IndexedDB store directly for upload and download, and it removes invalid saves over 512 KB.
-  - DOS.Zone's original build used js-dos **cloud saves** instead. quenq replaced them with local saves.
-- **Mods:** `.dff`/`.txd`/skin files kept in an IndexedDB store (`vcsky_mods_db`) are written into MEMFS in `onRuntimeInitialized`. For each one, the matching 32-byte `gta3.dir` entry gets its size in 2048-byte sectors updated.
+### Adapt texture cost without altering the original installation
 
-## 6. Where it comes from, and legal status
+The launcher times a reusable core chunk and selects Lighter below roughly
+750,000 encoded bytes/s, or when Save-Data is enabled. A cached probe can reuse the
+previous automatic choice. Automatic, Lighter, and Original remain user-selectable.
 
-- Dec 2025: DOS.Zone launched "reVCDOS". It was free as a demo; the full game needed you to supply your own files, checked by SHA-256. After DMCA pressure (Take-Two/EBRAND), DOS.Zone pulled the hosted version and **published the binaries**.
-- Community repos (Lolendor/reVCDOS, yukonga/revcdos, DevHarsh001/revcdos) then made a deobfuscated, self-hostable version. It is a Python/PHP proxy whose defaults are `--vcsky_url https://cdn.dos.zone/vcsky/` and `--vcbr_url https://br.cdn.dos.zone/vcsky/`, which is the same layout quenq uses. `cdn.dos.zone/vcsky/` now returns 403.
-- quenq.com hosts the full commercial game data (Rockstar's copyrighted assets) on its own Cloudflare origin and shows no authorization from the rights holders. **This is legally exposed.** Learning from the technique is fine; copying their asset hosting is not.
+Lighter reduces supported world textures to at most 64 pixels and loading artwork
+to 256 pixels. Fonts/UI, geometry, collision data, alpha-cutout textures, and
+unsupported formats are preserved. DXT3 alpha and palette preservation are tested.
+Reduced dictionaries retain padded file length to preserve archive-sector
+assumptions. Exactly 1,232 texture dictionaries change; Original file contents
+remain byte-for-byte equal to prepared originals.
 
-## 7. Takeaways for an "optimized" build
+| Pack budget | Original | Lighter |
+|---|---:|---:|
+| Core, Brotli bytes | 7,530,872 | 6,709,243 |
+| Traced first-scene packs, Brotli bytes | 12,308,214 | 6,809,654 |
 
-1. **Compress the data chunks** (brotli or zstd, or ship `.br` files with `Content-Encoding`). They are sent raw today, and game data usually shrinks a lot.
-2. **Stream more instead of preloading.** The 68 MB of `gta3.img` entries could be fetched per model through the same async path already used for audio, with a small starter set preloaded. DOS.Zone's own notes say about 50 MB is enough to boot.
-3. **Use OPFS or Cache Storage per file** instead of 7 large blobs, so one changed asset doesn't invalidate a 20 MB chunk.
-4. **Cap the frame rate at 30 for the simulation and render at display rate**, or decouple the two in the engine, instead of offering a choice between "uncapped" (breaks physics) and "30".
-5. **Possible further steps:** WASM SIMD, pthreads/SharedArrayBuffer (needs COOP/COEP, which complicates iframe embedding), cached compiled shaders, and recovery from lost WebGL contexts.
+The first-scene pack budget falls **44.7%**. These numbers exclude engine code,
+manifests, ambient/radio audio, and unpredictable extra assets; they are not a
+complete cold-start transfer budget.
 
-## Sources
-- Live: https://quenq.com/apps/vice-city/ and https://vc.quenq.com/ (copies of the HTML/JS in `research/raw/`)
-- https://github.com/DevHarsh001/revcdos — DOS.Zone's release notes (async engine, `getAsyncUrl`, data-compile pipeline)
-- https://github.com/Lolendor/reVCDOS and https://github.com/yukonga/revcdos — deobfuscated self-hosting server
-- https://korben.info/en/revcdos-vice-city-in-a-browser-tab.html
-- https://wccftech.com/playing-gta-vice-city-in-a-web-browser-is-now-possible-thanks-to-dos-zone/amp/
-- https://www.notebookcheck.net/Grand-Theft-Auto-Vice-City-is-now-playable-everywhere-through-a-browser-port.1189117.0.html
+### Share audio downloads
+
+Ambient and radio requests can overlap. A separate audio loader coalesces requests,
+returns independent bytes to consumers, and maintains a 32 MiB LRU plus optional
+versioned Cache Storage. Long radio transfers do not occupy model-pack slots.
+Audio remains unchanged; requests have bounded stalls, total duration, and retries.
+
+In the final slow run, simultaneous requests shared one completed download of
+`water.mp3`. Independently hashed browser copies of that recording (5,061,294 bytes)
+and Flash FM (28,703,364 bytes) matched the prepared sources. No human listening
+test is claimed. Both recordings still download whole; this engine behavior limits
+how small a cold session can become.
+
+## Slow connections and repeat visits
+
+At 150,000 bytes/s and 270 ms simulated latency:
+
+| Cache state | Selected textures | Start ready | Native menu | Playable street |
+|---|---|---:|---:|---:|
+| Cold | Automatic → Lighter | 48.957 s | 86.081 s | 183.174 s |
+| Warm | Lighter | 1.813 s | 4.114 s | 47.543 s |
+
+The cold run received **25,225,152 HTTP response-body bytes** through the
+playable-street endpoint, including partial transfers. At 150 KB/s, those bytes
+alone imply about 168 seconds of transfer. That explains why the optimized session
+still cannot be instant. The faster Original-quality run received 35,038,523 bytes;
+that cross-run difference is not a controlled texture-only comparison.
+
+The warm run received zero HTTP response-body bytes through that endpoint; HTTP
+validation headers still transferred. Its world timing includes engine startup
+and the intro sequence. Game/audio caches came from prior play. Since cold tests
+explicitly disabled HTTP caching, the shell/engine HTTP cache was deliberately
+primed before the warm test. This result does not imply an offline-installed app
+or that every unvisited area has already been cached.
+
+## Method and verification
+
+- Headless Chrome, software WebGL, 800×600, `?fps=30`, a persistent DevTools
+  connection, and the same New Game/intro-skip sequence for both comparison runs.
+- HTTP cache disabled and Cache Storage cleared for cold measurements. Screenshots
+  polled every two seconds to recognize menu/world endpoints, so millisecond
+  recording precision is not millisecond endpoint accuracy.
+- Both servers on the same development host. Candidate limited to one CPU / 4 GiB;
+  baseline had no explicit CPU quota. No concurrent builds/unpacks during final
+  comparison. Native rendering and random traffic introduce variation.
+- One reported final run per condition, not a distribution or confidence interval.
+- Original implementation verification: 17 Python and 22 JavaScript tests passed.
+  Later extraction regressions and CI are repository-hardening work, not evidence
+  of new runtime performance.
+- Independently reconstructed 2,740 unique packs and checked hashes, lengths, and
+  profile contents. Verified compressed HTTP round trips, cache headers, and 206
+  audio ranges. Injected model-pack/audio 404s exercised direct-URL fallback.
+- Final cold runs observed no HTTP error statuses or uncaught JavaScript exceptions.
+  Three aborted speculative requests per run were intentional preemptions.
+- Browser checks reached New Game, vehicle entry/movement while radio downloaded,
+  and a hospital respawn. A native IndexedDB marker survived reload/image update.
+  This is limited gameplay coverage, not a full-city, every-mission, or actual
+  in-game save-menu verification campaign.
+- AMD64 runtime tested; ARM64 built and inspected, not executed.
+
+The tested multi-platform image index was
+`sha256:1c8074a91c86c39ef7995b8d5f5443c6f2a765b9c6cbe282c9477571e8e1c2be`.
+The private portable archive was 2,871,660,408 bytes. Keeping originals, two texture
+profiles, legacy boot fallback, and compressed sidecars trades storage for delivery
+speed. The repository contains no image or asset payloads.
+
+Raw test profiles, duplicated asset trees, and large logs were removed during local
+cleanup. Small evidence records were retained locally; selected scalar results
+and their source hashes are committed in `benchmarks.json`. These summaries are
+not a replacement for an independently rerunnable full browser harness.
+
+## Reproduce and extend
+
+1. Supply your own classic game installation and build the image with the root
+   Dockerfile. Record image digest, source revision, browser version, platform,
+   quality, CPU/memory constraints, and exact network settings.
+2. Use an isolated browser profile. Clear both HTTP and download caches for a cold
+   run; preserve native save data separately if it matters. Record Start readiness,
+   menu, and first playable HUD with the same input/intro sequence.
+3. Collect HTTP body bytes (including interrupted requests), error statuses,
+   exceptions, scheduler cancellations, and gameplay pauses. Resource Timing
+   encoded sizes alone do not prove network transfer on a cached revisit.
+4. Repeat under 750,000 bytes/s / 80 ms and 150,000 bytes/s / 270 ms, then repeat with
+   deliberately warm caches. Run multiple trials before drawing statistical claims.
+5. Repeat through the actual hosting URL after deployment. Verify response lengths,
+   cache keys, compression and ranges. Compare another client/network and, where
+   authorized, a direct-origin path to isolate the bottleneck.
+6. Drive through uncached areas, change radio stations, exercise saves, and test
+   cache/retry failure paths. Faster Start readiness alone is not success.
+
+The largest remaining opportunity is faster effective delivery, potentially through
+an appropriately configured asset CDN. That requires measuring cold misses and
+warm hits, preserving query-string versions and content encodings, and verifying
+range behavior. No CDN/DNS change or new serving service was added here.
+
+Engine-side progressive audio, broader trace coverage, and finer texture budgets
+may reduce first-use cost further, but are not implemented or benchmarked claims.
+The current data does not establish pause-free play everywhere or optimized
+Launchpad production performance.
+
+## Scope and provenance
+
+This work optimizes packaging and delivery around DOS.Zone's revcDOS engine.
+It is not an original port, a general DOS emulator, or an engine source release.
+The current branding/cloud modifications are preserved by request. Their upstream
+permission requirements remain unresolved; see [THIRD_PARTY.md](../THIRD_PARTY.md).
+Public-source preparation must not be presented as distribution clearance.
+
+Implementation references: [root Dockerfile](../Dockerfile),
+[pack builder](../standalone/streaming.py),
+[chunk downloader](../docker/web/site/download.mjs),
+[stream cache](../docker/web/site/stream-assets.mjs), and
+[audio cache](../docker/web/site/audio-assets.mjs).
+
+Primary background references: [Caddy precompressed serving](https://caddyserver.com/docs/caddyfile/directives/file_server),
+[MDN Cache Storage](https://developer.mozilla.org/en-US/docs/Web/API/CacheStorage),
+and [upstream revcDOS](https://github.com/Carter54git/revcdos).

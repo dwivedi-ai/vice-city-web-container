@@ -5,14 +5,10 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'standalone'))
-try:
-    from PIL import Image
-    from streaming import children, chunk, dds, encode_dxt, reduce_txd
-except ImportError:
-    Image = None
+from PIL import Image
+from streaming import children, chunk, dds, encode_dxt, reduce_txd
 
 
-@unittest.skipIf(Image is None, 'Pillow 11.3+ is required for texture tests')
 class TextureTests(unittest.TestCase):
     def fixture(self, compression=1, alpha=0, size=128):
         im = Image.new('RGBA' if compression == 3 else 'RGB', (size, size), (120, 80, 30, 136) if compression == 3 else (120, 80, 30))

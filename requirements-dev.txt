@@ -1,0 +1,2 @@
+# Matches the texture encoder installed in the Docker build stage.
+Pillow==11.3.0

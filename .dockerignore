@@ -14,7 +14,6 @@
 !docker/web/site/
 !docker/web/site/**
 !standalone/
-!standalone/Dockerfile
 !standalone/validate_data.py
 !standalone/customize.py
 !standalone/engine-shell.html

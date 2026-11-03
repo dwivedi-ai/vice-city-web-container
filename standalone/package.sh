@@ -11,7 +11,7 @@ case "${1:-}" in
             --build-arg "BROTLI_LEVEL=${BROTLI_LEVEL:-6}" \
             --build-arg "ZSTD_LEVEL=${ZSTD_LEVEL:-10}" \
             --build-arg "PREPARE_JOBS=${PREPARE_JOBS:-2}" \
-            -t "$IMAGE" -f standalone/Dockerfile .
+            -t "$IMAGE" -f Dockerfile .
         ;;
     --export-only) docker image inspect "$IMAGE" >/dev/null ;;
     *) echo 'Usage: bash standalone/package.sh [--export-only]' >&2; exit 2 ;;
