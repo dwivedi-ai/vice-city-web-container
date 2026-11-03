@@ -71,6 +71,50 @@ PLATFORMS=linux/amd64 bash standalone/package.sh
 Use `linux/arm64` instead on an ARM64 host. `IMAGE`, `BROTLI_LEVEL`, `ZSTD_LEVEL`
 and `PREPARE_JOBS` can also be set when building.
 
+## Serving and loading
+
+The image precompresses boot data and streamed models/textures during the build.
+Caddy prefers Brotli, with Zstandard/gzip fallbacks; no compression tools run in
+the serving container. Already compressed radio/audio is left alone.
+
+Startup loads a small core; the first scene and later model/texture groups use
+separate content-addressed packs. The launcher measures a real reusable boot
+chunk and automatically selects lighter textures below about 6 Mbps. Choose
+**Original** on the launch screen (or `?quality=full`) to keep full texture quality;
+`?quality=low` forces lighter textures. Low mode reduces supported world textures
+to 64 pixels and loading artwork to 256 pixels, preserving fonts, UI, models,
+collision data, alpha-cutout textures and the source game files.
+
+Boot chunks are capped at 512 KiB with four concurrent downloads. Stream packs
+usually contain up to 512 KiB decoded data (a larger single file stays intact),
+with two concurrent downloads and demand taking priority over background work.
+The loader fills the native filesystem with related files before the engine asks
+for them. Its decoded pack cache is limited to 64 MiB, and speculative filesystem
+injection to 48 MiB; the engine also maintains its own loaded assets. Temporary
+blob URLs are revoked after use. Radio remains on demand. Concurrent requests
+for the same audio share one download; a separate 32 MiB memory cache and optional
+`vc-audio` disk cache reuse recordings without changing their quality. Audio does
+not occupy model-pack worker slots. Long audio requests have a 15-minute total
+limit, a 30-second stall limit and at most two attempts.
+
+Downloads check decoded length and SHA-256 on HTTPS/localhost. Interrupted
+chunks retry up to three attempts; stalled transfers time out after 30 seconds
+without data (120 seconds maximum per attempt). A final boot failure offers Retry,
+reusing completed cached chunks. Cache Storage failures do not prevent play.
+These caches are separate from native local saves. Pack failure falls back to
+the original individual asset, so that asset can use full texture quality.
+
+Every asset contributes to the data version, including files outside the boot
+preload. Only hashed boot/stream paths and versioned asset URLs receive immutable cache
+headers. Other URLs revalidate. Keep `Content-Encoding`, `Vary: Accept-Encoding`,
+and query strings intact in any hosting proxy/CDN. The image cannot override a
+hosting bandwidth limit; measure delivery through the public URL after release.
+
+Run regression checks with `python3 -m unittest discover -s tests -v` and
+`node --test tests/test_*.mjs` (Node 22+). Texture tests require Pillow 11.3.0
+(the build installs it only in a build stage). Browser validation should include
+cold/warm startup, New Game, entering vehicles/radio, driving, and local saves.
+
 HTML5 port by the [DOS.Zone team](https://dos.zone/revcdos). This custom build uses
 a minimal launch page, the original game's menu logo, local saves, and a guarded
 patch to remove the compiled menu footer. Engine upgrades require reviewing the

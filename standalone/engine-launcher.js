@@ -7,6 +7,15 @@ const textDecoder = new TextDecoder();
 document.body.dataset.isTouch = isTouch ? 1 : 0;
 let ready = false;
 let started = false;
+const qualitySelect = document.getElementById('quality');
+const requestedQuality = new URLSearchParams(location.search).get('quality');
+qualitySelect.value = ['low', 'full'].includes(requestedQuality) ? requestedQuality : 'auto';
+qualitySelect.addEventListener('change', () => {
+    const url = new URL(window.top.location.href);
+    if (qualitySelect.value === 'auto') url.searchParams.delete('quality');
+    else url.searchParams.set('quality', qualitySelect.value);
+    window.top.location.assign(url.href);
+});
 
 function failGame(error) {
     console.error(error);

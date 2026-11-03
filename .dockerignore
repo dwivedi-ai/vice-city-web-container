@@ -19,3 +19,5 @@
 !standalone/customize.py
 !standalone/engine-shell.html
 !standalone/engine-launcher.js
+!standalone/streaming.py
+!standalone/startup-files.list

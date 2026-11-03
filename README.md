@@ -54,8 +54,11 @@ Saves stay in this browser's IndexedDB storage; settings stay in localStorage.
 There is no account, cloud-save SDK, or remote save service. Clearing site data
 also removes local saves, and changing hostname/port uses a separate save store.
 
-URL options: `?fps=30` caps rendering at 30 FPS; `?prefetch=1` warms remaining
-non-audio assets in the background. Game language can be changed in its options.
+The launcher automatically uses lighter world textures on slow connections.
+Choose **Original** in the texture selector to keep full quality. URL options:
+`?quality=low` or `?quality=full` override automatic selection; `?fps=30` caps
+rendering at 30 FPS. Opening-scene packs prepare in the background, and later
+assets load in related groups. Game language can be changed in its options.
 
 ## Development
 

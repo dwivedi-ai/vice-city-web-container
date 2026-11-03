@@ -47,7 +47,7 @@ COPY standalone/customize.py /opt/customize.py
 RUN --mount=type=bind,source=gamefiles,target=/gamefiles,ro \
     python3 /opt/customize.py logo /data /gamefiles \
  && python3 /opt/prepare/bundle.py /data --preload-list /opt/revcdos/src/preload_files.list \
-      --compression boot --brotli-level "$BROTLI_LEVEL" --zstd-level "$ZSTD_LEVEL" --jobs "$PREPARE_JOBS" \
+      --compression all --brotli-level "$BROTLI_LEVEL" --zstd-level "$ZSTD_LEVEL" --jobs "$PREPARE_JOBS" \
  && python3 /opt/prepare/validate_data.py /data
 
 FROM --platform=$BUILDPLATFORM alpine:3 AS engine
@@ -67,21 +67,34 @@ RUN set -eu; python3 /opt/customize/customize.py engine /engine /opt/customize; 
         gzip -9 -k "$f"; brotli -q 11 -k "$f"; zstd -19 -q -k "$f"; \
     done
 
+# Adaptive asset packs are built separately from the expensive audio conversion.
+# Changing the serving strategy must not repeat conversion of every sound.
+FROM customized-data AS streamed-data
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3-venv \
+ && rm -rf /var/lib/apt/lists/* \
+ && python3 -m venv /opt/streaming-venv \
+ && /opt/streaming-venv/bin/pip install --no-cache-dir Pillow==11.3.0
+COPY standalone/streaming.py standalone/startup-files.list /opt/streaming/
+RUN /opt/streaming-venv/bin/python /opt/streaming/streaming.py /data /stream \
+      --startup /opt/streaming/startup-files.list
+
 # Both platform variants share the WASM/game assets and use native Caddy.
 # No target-architecture commands are executed during the build.
 FROM caddy:2-alpine AS server
 FROM alpine:3 AS runtime
 COPY --from=server /usr/bin/caddy /usr/bin/caddy
 COPY --from=server /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-COPY --from=engine /engine /srv/engine
+COPY --link --from=engine /engine /srv/engine
 COPY docker/web/site/ /srv/
 COPY docker/web/Caddyfile /etc/caddy/Caddyfile
-COPY --from=customized-data /data/bundle /srv/data/bundle
-COPY --from=customized-data /data/vc-assets /srv/data/vc-assets
+COPY --link --from=customized-data /data/bundle /srv/data/bundle
+COPY --link --from=customized-data /data/vc-assets /srv/data/vc-assets
+COPY --link --from=streamed-data /stream /srv/data/stream
 ENV SITE_ADDRESS=:8080 XDG_CONFIG_HOME=/tmp/config XDG_DATA_HOME=/tmp/data
 WORKDIR /srv
 USER 1000:1000
 EXPOSE 8080
 HEALTHCHECK --interval=15s --timeout=5s --start-period=5s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:8080/data/bundle/manifest.json || exit 1
+    CMD wget -q -O /dev/null http://127.0.0.1:8080/data/stream/index.json || exit 1
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

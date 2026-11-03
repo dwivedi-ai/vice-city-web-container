@@ -5,8 +5,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Vice City</title>
   <link rel="icon" href="data:,">
-  <link rel="preload" href="data/bundle/manifest.json" as="fetch" crossorigin="anonymous">
+  <link rel="preload" href="data/stream/index.json" as="fetch" crossorigin="anonymous">
   <link rel="modulepreload" href="launcher.js">
+  <link rel="modulepreload" href="download.mjs">
+  <link rel="modulepreload" href="stream-assets.mjs">
+  <link rel="modulepreload" href="audio-assets.mjs">
   <style>
     html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
     #game { position: fixed; inset: 0; width: 100%; height: 100%; border: 0; display: block; }
@@ -14,6 +17,8 @@
            transition: width .15s, opacity .6s; z-index: 2; pointer-events: none; }
     #error { position: fixed; inset: 0; display: none; place-items: center; z-index: 3;
              background: #000d; color: #fff; font: 15px/1.5 system-ui, sans-serif; padding: 2em; text-align: center; }
+    #error button { background: #fff; color: #111; border: 0; border-radius: 6px;
+                    padding: .75em 2em; font: inherit; cursor: pointer; }
     .done { opacity: 0; }
   </style>
 </head>

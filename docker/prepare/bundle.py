@@ -67,12 +67,14 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("data", help="folder that contains vc-assets/")
     ap.add_argument("--preload-list", required=True)
-    ap.add_argument("--part-size", type=int, default=16 << 20)
+    ap.add_argument("--part-size", type=int, default=2 << 20)
     ap.add_argument("--brotli-level", type=int, default=11)
     ap.add_argument("--zstd-level", type=int, default=19)
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 2)
     ap.add_argument("--compression", choices=("all", "boot", "none"), default="all")
     args = ap.parse_args()
+    if args.part_size <= 0 or args.jobs <= 0:
+        ap.error("part-size and jobs must be positive")
 
     data = Path(args.data)
     assets = data / "vc-assets"
@@ -94,7 +96,10 @@ def main():
     # World loading opens map definitions and collision data synchronously.
     wanted += [p for p in all_files if p not in wanted and
                (p.startswith(("vc-assets/local/data/", "vc-assets/local/text/")) or p.endswith(".col"))]
-    preload = [p for p in wanted if p in available]
+    # The upstream list includes an entire radio station. Audio is already
+    # streamable and indexed by sound.cache; retain the working world preload.
+    preload = [p for p in wanted if p in available and
+               not p.endswith((".adf", ".mp3", ".wav"))]
     missing = [p for p in wanted if p not in available]
 
     digest = hashlib.sha256()
@@ -106,7 +111,14 @@ def main():
         entries.append([rel, offset, len(blob)])
         offset += len(blob)
     total = offset
-    version = digest.hexdigest()[:16]
+    preload_version = digest.hexdigest()[:16]
+    # On-demand URLs must also change when a NON-preloaded asset changes.
+    asset_digest = hashlib.sha256()
+    for rel in all_files:
+        with (data / rel).open("rb") as source:
+            content_hash = hashlib.file_digest(source, "sha256").digest()
+        asset_digest.update(rel.encode() + b"\0" + content_hash)
+    version = asset_digest.hexdigest()[:16]
 
     parts = []
     part_index = 0
@@ -116,9 +128,10 @@ def main():
         nonlocal current, part_index
         if not current:
             return
-        name = f"preload-{version}-{part_index}.bin"
+        checksum = hashlib.sha256(current).hexdigest()
+        name = f"preload-{checksum}.bin"
         (bundle / name).write_bytes(current)
-        parts.append({"url": f"bundle/{name}", "size": len(current)})
+        parts.append({"url": f"bundle/{name}", "size": len(current), "sha256": checksum})
         part_index += 1
         current = bytearray()
 
@@ -134,10 +147,15 @@ def main():
     flush()
 
     manifest = {
+        "schema": 2,
         "version": version,
-        "preload": {"size": total, "parts": parts, "files": entries},
+        "preload": {"version": preload_version, "size": total, "parts": parts, "files": entries},
         "files": all_files,
     }
+    sound = data / "vc-assets/local/audio/sound.cache"
+    if sound.is_file():
+        payload = sound.read_bytes()
+        manifest["soundCache"] = {"size": len(payload), "sha256": hashlib.sha256(payload).hexdigest()}
     (bundle / "manifest.json").write_text(json.dumps(manifest, separators=(",", ":")))
 
     print(f"bundle: {len(all_files)} files, {len(preload)} preloaded "

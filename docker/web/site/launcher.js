@@ -5,18 +5,20 @@
 // a folder picker.
 //
 // What makes it fast:
-//  - the boot files arrive as a few large precompressed parts fetched in
+//  - the boot files arrive as small, verified precompressed chunks fetched in
 //    parallel. Downloading starts while the start screen is still showing,
 //    and the parts are kept in Cache Storage for the next visit;
-//  - on-demand assets are served by URL (versioned, cached as immutable)
-//    instead of as blob: URLs, which game.js never revokes;
+//  - related on-demand assets share verified packs and fill the native
+//    filesystem ahead of demand; temporary delivery URLs are released;
 //  - optional ?fps=N caps the frame rate with no busy-waiting;
-//  - optional ?prefetch=1 warms the HTTP cache with the remaining models
-//    and animations once the game is running.
+//  - automatic texture quality adapts to measured download speed.
+
+import { download, loadChunks, openCache } from "./download.mjs";
+import { createAssetStore, installBlobDelivery } from "./stream-assets.mjs";
+import { createAudioStore } from "./audio-assets.mjs";
 
 const params = new URLSearchParams(location.search);
 const fpsCap = Math.max(0, parseInt(params.get("fps") || "0", 10) || 0);
-const prefetch = params.get("prefetch") === "1";
 
 const iframe = document.getElementById("game");
 const bar = document.getElementById("bar");
@@ -24,7 +26,6 @@ const errorEl = document.getElementById("error");
 let dataReady = false;
 let progressText = "Loading game…";
 
-const PRELOAD_CACHE = "vc-preload";
 const SOUND_CACHE = "vc-assets/local/audio/sound.cache";
 
 function setProgress(fraction, text) {
@@ -34,60 +35,64 @@ function setProgress(fraction, text) {
 }
 
 async function loadManifest() {
-  const res = await fetch("data/bundle/manifest.json", { cache: "no-cache" });
-  if (!res.ok) throw new Error("Game data is unavailable. Reload to try again.");
-  return res.json();
+  const index = JSON.parse(new TextDecoder().decode(await download("data/stream/index.json")));
+  let quality = params.get("quality");
+  if (!["low", "full"].includes(quality)) {
+    let started = 0, wireBytes = 0;
+    try {
+      const cache = await openCache("vc-preload");
+      await download(new URL(`data/${index.probe.url}`, location.href).href, index.probe, {
+        cache, timeoutMs: 8000, attempts: 1,
+        onResponse: response => {
+          started = performance.now();
+          wireBytes = Number(response.headers.get("Content-Length"));
+        },
+      });
+      const speed = started ? wireBytes / Math.max(.001, (performance.now() - started) / 1000) : 0;
+      let previous = "low";
+      try { previous = localStorage.getItem("vc.auto-quality") || "low"; } catch {}
+      if (!["low", "full"].includes(previous)) previous = "low";
+      quality = navigator.connection?.saveData ? "low" : started ? (speed >= 750000 ? "full" : "low") : previous;
+    } catch { quality = "low"; }
+    try { localStorage.setItem("vc.auto-quality", quality); } catch {}
+  }
+
+  const bytes = await download(new URL(`data/${index.profiles[quality]}`, location.href).href);
+  const manifest = JSON.parse(new TextDecoder().decode(bytes));
+  document.documentElement.dataset.quality = quality;
+  return manifest;
 }
 
-async function fetchPart(cache, part, onBytes) {
-  const url = new URL(part.url, new URL("data/", location.href)).href;
-  let res = cache && (await cache.match(url));
-  if (!res) {
-    res = await fetch(url);
-    if (!res.ok) throw new Error(`${res.status} ${url}`);
-  }
-  // Content-Length is the compressed size and the stream gives decoded bytes,
-  // so progress is counted in decoded bytes against part.size.
-  const reader = res.clone().body.getReader();
-  const out = new Uint8Array(part.size);
-  let at = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    out.set(value, at);
-    at += value.length;
-    onBytes(value.length);
-  }
-  if (at !== part.size) throw new Error(`short read on ${url}: ${at}/${part.size}`);
-  if (cache && !(await cache.match(url))) await cache.put(url, new Response(out));
-  return out;
-}
-
-async function loadPreload(manifest) {
-  const { size, parts } = manifest.preload;
-  let cache = null;
-  try {
-    cache = await caches.open(PRELOAD_CACHE);
-    for (const req of await cache.keys()) {
-      if (!req.url.includes(manifest.version)) await cache.delete(req);
-    }
-  } catch {
-    // Cache Storage needs a secure context (https or localhost); the HTTP cache still applies.
-  }
-  let loaded = 0;
-  const onBytes = (n) => {
-    loaded += n;
-    setProgress(loaded / size, `Loading game data… ${Math.floor((loaded / size) * 100)}%`);
-  };
-  const buffers = await Promise.all(parts.map((p) => fetchPart(cache, p, onBytes)));
-  const all = new Uint8Array(size);
-  let at = 0;
-  for (const b of buffers) {
-    all.set(b, at);
-    at += b.length;
-  }
+async function loadPreload(manifest, signal) {
+  let lastPercent = -1;
+  const all = await loadChunks(manifest.preload, new URL("data/", location.href), {
+    signal,
+    onProgress: (loaded, size) => {
+      const percent = Math.min(100, Math.floor(loaded / size * 100));
+      if (percent !== lastPercent) {
+        lastPercent = percent;
+        setProgress(loaded / size, `Loading game data… ${percent}%`);
+      }
+    },
+    onRetry: () => setProgress(Math.max(0, lastPercent) / 100, "Connection interrupted. Retrying…"),
+  });
   setProgress(1, "Preparing game…");
   return all;
+}
+
+function showError(error) {
+  dataReady = false;
+  errorEl.replaceChildren();
+  const message = document.createElement("p");
+  message.textContent = `Unable to load the game: ${error.message || "connection interrupted"}.`;
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "Retry";
+  retry.onclick = () => location.reload();
+  const panel = document.createElement("div");
+  panel.append(message, retry);
+  errorEl.append(panel);
+  errorEl.style.display = "grid";
 }
 
 function assetUrl(manifest, file) {
@@ -98,7 +103,7 @@ function normalize(file) {
   return file.replaceAll("\\", "/").replace(/\/+/g, "/").replace(/^\//, "").toLowerCase();
 }
 
-function installFrameHooks(win, manifest, available) {
+function installFrameHooks(win, manifest, available, store, audio) {
   if (win.__launcherHooksInstalled) return;
   win.__launcherHooksInstalled = true;
   // Keyboard Lock is restricted to the top-level browsing context. Failure is
@@ -112,12 +117,28 @@ function installFrameHooks(win, manifest, available) {
   // the engine reaches assets through that object. Hand it real URLs for
   // on-demand assets. Install as early as possible, and adopt a Module that
   // is already there.
+  const packedUrl = installBlobDelivery(win, {
+    stats: store.stats, read: file => audio.has(file) ? audio.read(file) : store.read(file),
+  });
   const hook = (value) => {
     if (value && typeof value === "object" && "getAsyncUrl" in value && !value.__fastAsync) {
       value.__fastAsync = true;
+      const initialize = value.initFS;
+      value.initFS = async (...args) => {
+        const result = await initialize.apply(value, args);
+        // The upstream mainCalled creates /vc-assets with exclusive mkdir.
+        // Wait for its core setup before inserting speculative scene files.
+        store.attachFS(value.FS || win.FS);
+        return result;
+      };
       value.getAsyncUrl = (file) => {
         const f = normalize(file);
-        return available.has(f) ? Promise.resolve(assetUrl(manifest, f)) : Promise.reject(new Error(`File not found: ${f}`));
+        if (!available.has(f)) return Promise.reject(new Error(`File not found: ${f}`));
+        if (store.has(f) || audio.has(f)) return packedUrl(f).catch(error => {
+          console.warn(`Cached download unavailable; falling back to original asset: ${f}`, error);
+          return assetUrl(manifest, f);
+        });
+        return Promise.resolve(assetUrl(manifest, f));
       };
     }
     return value;
@@ -145,45 +166,41 @@ function installFrameHooks(win, manifest, available) {
   }
 }
 
-function startPrefetch(manifest, available) {
-  const queue = [...available].filter((f) => !/\.(mp3|wav)$/.test(f) && !preloadedSet.has(f));
-  let i = 0;
-  const step = async (deadline) => {
-    while (i < queue.length && (!deadline || deadline.timeRemaining() > 5)) {
-      const url = assetUrl(manifest, queue[i++]);
-      try { await fetch(url, { priority: "low" }); } catch {}
-    }
-    if (i < queue.length) requestIdleCallback(step, { timeout: 2000 });
-  };
-  requestIdleCallback(step, { timeout: 2000 });
-}
-
-let preloadedSet = new Set();
-
 async function main() {
   const manifest = await loadManifest();
   const available = new Set(manifest.files);
+  const store = createAssetStore(manifest, new URL("data/", location.href));
+  const audio = createAudioStore(
+    manifest.files.filter(file => /\/audio\/.*\.(adf|mp3|wav)$/.test(file) && !store.has(file)),
+    file => assetUrl(manifest, file),
+  );
+  window.addEventListener("pagehide", () => { store.close(); audio.close(); }, { once: true });
+  window.__audioStats = audio.stats;
+  window.__assetStats = store.stats;
   const files = manifest.preload.files.filter(([path]) => path !== SOUND_CACHE);
-  preloadedSet = new Set(files.map((f) => f[0]));
-  preloadedSet.add(SOUND_CACHE);
 
   // Read separately so older boot packs can use a newly generated audio index.
   // Without durations, the engine divides by zero while initializing streams
   // that have intentionally not been downloaded yet.
-  const soundCachePromise = fetch(assetUrl(manifest, SOUND_CACHE)).then(async (res) => {
-    if (!res.ok) throw new Error("Game audio is unavailable. Reload to try again.");
-    return new Uint8Array(await res.arrayBuffer());
-  });
+  const startup = new AbortController();
+  const soundCachePromise = download(assetUrl(manifest, SOUND_CACHE), manifest.soundCache, { signal: startup.signal });
 
-  const preloadPromise = Promise.all([loadPreload(manifest), soundCachePromise]);
+  let preloadPromise = Promise.all([loadPreload(manifest, startup.signal), soundCachePromise]);
   preloadPromise.then(() => {
     dataReady = true;
     setProgress(1, "");
     bar.classList.add("done");
-  }).catch((e) => { errorEl.textContent = `Failed to load the game: ${e.message}`; errorEl.style.display = "grid"; });
+    // Use the time spent at the Start button and initializing WebAssembly.
+    // The finite scene queue yields to demand and remains in the pack cache
+    // until the engine's filesystem is available.
+    store.prefetch();
+  }).catch((error) => {
+    startup.abort(error);
+    showError(error);
+  });
 
   iframe.addEventListener("load", () => {
-    installFrameHooks(iframe.contentWindow, manifest, available);
+    installFrameHooks(iframe.contentWindow, manifest, available, store, audio);
     iframe.contentWindow.postMessage({ event: "launcher.progress", ready: dataReady, text: progressText }, location.origin);
   });
   iframe.src = `engine/index.html${location.search}`;
@@ -194,7 +211,7 @@ async function main() {
     const win = iframe.contentWindow;
     let ready = false;
     try { ready = win.location.pathname === engineUrl && win.document.readyState !== "uninitialized"; } catch {}
-    if (ready) installFrameHooks(win, manifest, available);
+    if (ready) installFrameHooks(win, manifest, available, store, audio);
     else setTimeout(waitForEngineDocument, 4);
   })();
 
@@ -207,6 +224,9 @@ async function main() {
     const reply = (msg, transfer) => event.source.postMessage(msg, location.origin, transfer);
 
     switch (data.event) {
+      case "game.started":
+        store.prefetch();
+        break;
       case "module.initfs":
         [preload, soundCache] = await preloadPromise;
         next = 0;
@@ -216,10 +236,10 @@ async function main() {
         if (next === files.length) {
           next++;
           reply({ event: ">module.initfile", path: SOUND_CACHE, data: soundCache }, [soundCache.buffer]);
+          preloadPromise = null;
           preload = null;
           soundCache = null;
           bar.classList.add("done");
-          if (prefetch) startPrefetch(manifest, available);
           break;
         }
         const entry = files[next++];
@@ -233,7 +253,8 @@ async function main() {
         // Fallback path, used only if the Module hook above didn't take.
         const f = normalize(data.file || "");
         if (!available.has(f)) return reply({ event: ">module.getasyncurl", file: data.file });
-        const buf = await (await fetch(assetUrl(manifest, f))).arrayBuffer();
+        const bytes = store.has(f) ? await store.read(f) : audio.has(f) ? await audio.read(f) : await download(assetUrl(manifest, f));
+        const buf = bytes.buffer;
         reply({ event: ">module.getasyncurl", file: data.file, data: new Uint8Array(buf) }, [buf]);
         break;
       }
@@ -244,7 +265,4 @@ async function main() {
   });
 }
 
-main().catch((error) => {
-  errorEl.textContent = error.message || "Unable to load the game. Reload to try again.";
-  errorEl.style.display = "grid";
-});
+main().catch(showError);
