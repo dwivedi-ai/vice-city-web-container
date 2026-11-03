@@ -2,8 +2,7 @@
 
 This project develops container packaging and browser asset delivery around a
 pinned upstream engine. Read [the README](README.md) and
-[third-party requirements](THIRD_PARTY.md) before proposing a change. Source
-cleanup does not resolve permission to distribute the customized engine.
+[third-party attribution](THIRD_PARTY.md) before proposing a change.
 
 ## Local checks
 

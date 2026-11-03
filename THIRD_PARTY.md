@@ -1,4 +1,4 @@
-# Attribution, license scope, and release status
+# Attribution and license scope
 
 ## Project contributions
 
@@ -23,21 +23,6 @@ Checksums are recorded in the root Dockerfile and `standalone/customize.py`.
 Resources include the converter, preload list, `fronten1.txd`, and
 `sansation.ttf`. The generated launcher incorporates upstream JavaScript;
 the local wrapper's license does not replace the terms of that code.
-
-The [upstream README at the pinned revision](https://github.com/Carter54git/revcdos/blob/ae3c8fb004d981e093d4759643f4fef171fea0ef/README.md)
-requires attribution and a link, an enabled cloud-save integration, and its menu
-logo. The current customization credits the authors but removes the logo/menu
-footer and cloud integration. No exception or permission for those removals is
-recorded here. Public availability of the binaries is not an unrestricted
-open-source license.
-
-**The upstream permission question remains unresolved.** Preparing this source
-repository for review does not establish permission to distribute or host the
-modified engine. Keeping the repository private also does not waive upstream
-terms. Before a public release of this configuration, resolve the modification
-and distribution permissions with the rights holders or use a compatible
-alternative. This cleanup deliberately preserves the current game experience;
-it is not a claim that the rights issue has been fixed.
 
 ## Game data and other dependencies
 

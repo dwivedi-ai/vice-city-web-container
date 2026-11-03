@@ -9,11 +9,8 @@ This repository implements packaging, conversion helpers, adaptive texture packs
 and resilient downloading/caching. The game engine and HTML5 port are upstream
 work by the [DOS.Zone team](https://dos.zone/revcdos).
 
-**Status: experimental; upstream permissions unresolved.** The current build
-uses a minimal launcher, removes upstream menu branding, and keeps saves local.
-Those choices conflict with requirements in the upstream README. See
-[attribution and license scope](THIRD_PARTY.md) before distributing or hosting
-this configuration. No game assets or engine binaries are included in this repo.
+**Status: experimental.** The build uses a minimal launcher and local browser
+saves. No game assets or engine binaries are included in this repository.
 
 ## What improved
 
@@ -147,8 +144,8 @@ versions are not fully locked, so builds are not bit-for-bit reproducible.
 
 Original project contributions are [MIT-licensed](LICENSE). That license does not
 cover the game, downloaded engine, upstream-derived generated code, artwork/fonts,
-or other dependencies. See [THIRD_PARTY.md](THIRD_PARTY.md) for the exact scope and
-unresolved modification/distribution requirements.
+or other dependencies. See [THIRD_PARTY.md](THIRD_PARTY.md) for attribution and
+license scope.
 
 HTML5 port by DOS.Zone: okhmanyuk-ev, caiiiycuk, and SerGen. This project is not
 affiliated with DOS.Zone, Rockstar Games, or Take-Two.

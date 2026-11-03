@@ -1,6 +1,6 @@
 # Vice City: one portable Docker image
 
-The image contains the web server, customized revcDOS engine, minimal launcher,
+The image contains the web server, pinned revcDOS engine, minimal launcher,
 and prepared game data. It needs no game-folder mount, data volume, preparation
 container, or additional image at runtime. The default exported package includes
 Linux x86-64 (`amd64`) and ARM64 variants under one image tag.
@@ -35,7 +35,6 @@ save SDK. Local saves live in this browser's IndexedDB storage; clearing site
 data deletes them, and another browser or hostname has a separate save store.
 For remote access, HTTPS through a reverse proxy enables
 secure-context features such as native gamepads and persistent asset caching.
-The upstream hostname redirect is disabled for this self-hosted image.
 
 This archive includes your game assets: keep it private rather than publishing it
 as a public registry image.
@@ -50,7 +49,7 @@ bash standalone/package.sh
 ```
 
 The build checks the source layout, converts audio/models, generates the required
-audio-duration cache, restores the original menu logo, builds and validates the boot bundle, and assembles the
+audio-duration cache, builds and validates the boot bundle, and assembles the
 runtime image. Conversion tools exist only in build stages. Both CPU variants
 share the same architecture-independent game assets; conversion runs on the
 build machine's native CPU.
@@ -116,17 +115,12 @@ the Python and Node suites. Texture dependencies are required, not optional.
 Browser validation should include cold/warm startup, New Game, entering
 vehicles/radio, driving, and local saves.
 
-HTML5 port by the [DOS.Zone team](https://dos.zone/revcdos). This custom build uses
-a minimal launch page, the original game's menu logo, local saves, and a guarded
-patch to remove the compiled menu footer. Engine upgrades require reviewing the
-patch against the new binary; an unexpected checksum stops the build.
+HTML5 port by the [DOS.Zone team](https://dos.zone/revcdos). Engine upgrades
+require reviewing the integration against the new binary; an unexpected checksum
+stops the build.
 
-## License scope and permission status
+## License scope
 
 The source repository licenses only original project contributions under MIT.
 The engine, upstream-derived generated launcher, and game assets retain separate
-terms. Upstream requires its menu logo and cloud integration; this image removes
-both, and no exception is recorded. Permission for this modified configuration
-remains unresolved, even for a private repository. See `THIRD_PARTY.md` in the
-source checkout before hosting or distributing it. Source cleanup does not change
-the terms applying to an already exported image.
+terms. See `THIRD_PARTY.md` in the source checkout for attribution and license scope.

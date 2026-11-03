@@ -208,9 +208,7 @@ Launchpad production performance.
 
 This work optimizes packaging and delivery around DOS.Zone's revcDOS engine.
 It is not an original port, a general DOS emulator, or an engine source release.
-The current branding/cloud modifications are preserved by request. Their upstream
-permission requirements remain unresolved; see [THIRD_PARTY.md](../THIRD_PARTY.md).
-Public-source preparation must not be presented as distribution clearance.
+See [THIRD_PARTY.md](../THIRD_PARTY.md) for attribution and license scope.
 
 Implementation references: [root Dockerfile](../Dockerfile),
 [pack builder](../standalone/streaming.py),
