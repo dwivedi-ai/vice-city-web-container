@@ -7,7 +7,7 @@ Date: 2026-11-03, Asia/Kolkata. Initial deployment captures are from 2026-11-02 
 Investigate very slow loading on Launchpad, followed by loading screens and missing textures during play. Local play is fast. Preserve the existing product requirements: one self-contained Docker image, minimal **Start game** screen, no cloud-save integration, and persistent local browser saves.
 
 - Deployment: <https://gta-xo-su1mcue.apps.hello-xo.nl/>
-- Private source repository: <https://github.com/dwivedi-ai/revcdos-selfhost>
+- Private source repository: <https://github.com/dwivedi-ai/vice-city-web-container>
 - Source baseline: `50ded74a4990104100a08974c80a83caf15be150`.
 - Published image: `registry.xo.builders/gta-xo-su1mcue/app:latest`, built for `linux/amd64`.
 - Last published image-index digest: `sha256:62c0b935681f051c2b980092e708446697588ce47c3b1883df9127ce2ab2a939`.

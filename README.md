@@ -1,4 +1,4 @@
-# Vice City in one Docker image
+# Vice City Web Container
 
 Build a self-contained browser version of Vice City from your classic PC game
 installation. The final image includes Caddy, the pinned revcDOS WebAssembly
