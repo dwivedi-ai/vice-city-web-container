@@ -85,6 +85,7 @@ FROM caddy:2-alpine AS server
 FROM alpine:3 AS runtime
 COPY --from=server /usr/bin/caddy /usr/bin/caddy
 COPY --from=server /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+COPY LICENSE THIRD_PARTY.md /usr/share/doc/vice-city-web-container/
 COPY --link --from=engine /engine /srv/engine
 COPY docker/web/site/ /srv/
 COPY docker/web/Caddyfile /etc/caddy/Caddyfile

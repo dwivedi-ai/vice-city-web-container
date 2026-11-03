@@ -1,5 +1,7 @@
 *
 !Dockerfile
+!LICENSE
+!THIRD_PARTY.md
 !gamefiles/
 !gamefiles/**
 !docker/
